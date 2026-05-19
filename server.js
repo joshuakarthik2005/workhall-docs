@@ -26,8 +26,21 @@ const express = require('express');
 const cors = require('cors');
 const { createClient } = require('@supabase/supabase-js');
 const Groq = require('groq-sdk');
-const { generateEmbedding, EMBEDDING_DIMENSIONS, MODEL_NAME } = require('./scripts/embeddings');
 require('dotenv').config();
+
+// Lazy-load the embedding module — loaded on first search request
+// This prevents ONNX Runtime from interfering with Render's port detection
+let embeddingModule = null;
+async function getEmbeddingModule() {
+  if (!embeddingModule) {
+    console.log('🔄 Loading embedding model (first request)...');
+    embeddingModule = require('./scripts/embeddings');
+    // Warm up the pipeline
+    await embeddingModule.generateEmbedding('warm up');
+    console.log('✅ Embedding model ready!');
+  }
+  return embeddingModule;
+}
 
 // ============================================================
 // Configuration
@@ -79,19 +92,33 @@ app.use(cors({
 app.use(express.json());
 
 // ============================================================
-// Pre-warm the embedding model on startup
+// Start server IMMEDIATELY so Render detects the port
+// Embedding model loads lazily on first search request
 // ============================================================
 
-(async () => {
-  try {
-    console.log('🔄 Pre-warming embedding model...');
-    await generateEmbedding('warm up');
-    console.log('✅ Embedding model ready!\n');
-  } catch (err) {
-    console.warn('⚠️  Could not pre-warm embedding model:', err.message);
-    console.warn('   Model will be loaded on first search request.\n');
+const server = app.listen(PORT, '0.0.0.0', () => {
+  console.log(`\n🚀 Workhall Docs Search API running on port ${PORT}`);
+  console.log(`   POST /api/search — Search documentation`);
+  console.log(`   GET  /api/health — Health check`);
+  console.log(`\n   Chat model: ${CHAT_MODEL} (via Groq)`);
+  console.log(`   Embedding model: all-MiniLM-L6-v2 (local, 384d, lazy-loaded)`);
+  if (process.env.FRONTEND_URL) {
+    console.log(`   Frontend URL: ${process.env.FRONTEND_URL}`);
   }
-})();
+  console.log();
+
+  const missing = [];
+  if (!process.env.GROQ_API_KEY) missing.push('GROQ_API_KEY');
+  if (!process.env.SUPABASE_URL) missing.push('SUPABASE_URL');
+  if (!process.env.SUPABASE_SERVICE_KEY) missing.push('SUPABASE_SERVICE_KEY');
+
+  if (missing.length > 0) {
+    console.warn(`⚠️  Missing environment variables: ${missing.join(', ')}`);
+    console.warn('   Search will not work until these are configured.\n');
+  } else {
+    console.log('✅ All environment variables configured.\n');
+  }
+});
 
 // ============================================================
 // Health check endpoint
@@ -137,6 +164,7 @@ app.post('/api/search', async (req, res) => {
     // --------------------------------------------------------
     console.log('  📊 Generating query embedding (local model)...');
 
+    const { generateEmbedding } = await getEmbeddingModule();
     const queryEmbedding = await generateEmbedding(trimmedQuery);
 
     // --------------------------------------------------------
@@ -240,35 +268,5 @@ Rules:
       error: 'An error occurred while processing your search. Please try again.',
       details: process.env.NODE_ENV === 'development' ? error.message : undefined,
     });
-  }
-});
-
-// ============================================================
-// Start server
-// ============================================================
-
-// Bind to 0.0.0.0 so Render (and other cloud hosts) can route traffic to this server
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`\n🚀 Workhall Docs Search API running on port ${PORT}`);
-  console.log(`   POST /api/search — Search documentation`);
-  console.log(`   GET  /api/health — Health check`);
-  console.log(`\n   Chat model: ${CHAT_MODEL} (via Groq)`);
-  console.log(`   Embedding model: ${MODEL_NAME} (local, ${EMBEDDING_DIMENSIONS}d)`);
-  if (process.env.FRONTEND_URL) {
-    console.log(`   Frontend URL: ${process.env.FRONTEND_URL}`);
-  }
-  console.log();
-
-  // Validate environment
-  const missing = [];
-  if (!process.env.GROQ_API_KEY) missing.push('GROQ_API_KEY');
-  if (!process.env.SUPABASE_URL) missing.push('SUPABASE_URL');
-  if (!process.env.SUPABASE_SERVICE_KEY) missing.push('SUPABASE_SERVICE_KEY');
-
-  if (missing.length > 0) {
-    console.warn(`⚠️  Missing environment variables: ${missing.join(', ')}`);
-    console.warn('   Search will not work until these are configured.\n');
-  } else {
-    console.log('✅ All environment variables configured.\n');
   }
 });
