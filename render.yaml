@@ -1,0 +1,36 @@
+# ============================================================
+# Render Blueprint — Deploys the Express search API server
+# ============================================================
+# This file tells Render how to build and run the search API.
+# Connect your GitHub repo on Render and it auto-detects this file.
+# ============================================================
+
+services:
+  - type: web
+    name: workhall-docs-api
+    runtime: node
+    plan: free
+
+    # Build command — install all dependencies
+    buildCommand: npm install
+
+    # Start command — run the Express server
+    startCommand: node server.js
+
+    # Health check to verify the service is running
+    healthCheckPath: /api/health
+
+    # Environment variables — set these in Render dashboard
+    envVars:
+      - key: GROQ_API_KEY
+        sync: false  # Must be set manually in Render dashboard
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+      - key: FRONTEND_URL
+        sync: false  # Set to your Cloudflare Pages URL (e.g., https://workhall-docs.pages.dev)
+      - key: DOCS_BASE_URL
+        sync: false  # Set to same as FRONTEND_URL
+      - key: NODE_ENV
+        value: production
