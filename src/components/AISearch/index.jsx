@@ -188,7 +188,7 @@ export default function AISearch() {
       console.error('Search error:', err);
       setError(
         err.message.includes('Failed to fetch')
-          ? 'Cannot connect to search server. Make sure the server is running on port 3001 (run: node server.js)'
+          ? 'Cannot connect to the search server. Please try again in a moment.'
           : err.message
       );
     } finally {
